@@ -1,77 +1,86 @@
 package main
 
 import (
-  "fmt"
-  "net"
-  "log"
-  "bufio"
+	"bufio"
+	"fmt"
+	"log"
+	"net"
+	"strings"
 )
 
 type client chan<- string // canal de mensagem
 
 var (
-  entering = make(chan client)
-  leaving = make(chan client)
-  messages = make(chan string)
+	entering = make(chan client)
+	leaving  = make(chan client)
+	messages = make(chan string)
 )
 
 func broadcaster() {
-  clients := make(map[client]bool) // todos os clientes conectados
-  for {
-    select {
-      case msg := <-messages:
-        // broadcast de mensagens. Envio para todos
-        for cli := range clients {
-          cli <- msg
-        }
-      case cli := <-entering:
-        clients[cli] = true
-      case cli := <-leaving:
-        delete(clients, cli)
-        close(cli)
-    }
-  }
+	clients := make(map[client]bool) // todos os clientes conectados
+	for {
+		select {
+		case msg := <-messages:
+			// broadcast de mensagens. Envio para todos
+			for cli := range clients {
+				cli <- msg
+			}
+		case cli := <-entering:
+			clients[cli] = true
+		case cli := <-leaving:
+			delete(clients, cli)
+			close(cli)
+		}
+	}
 }
 
 func clientWriter(conn net.Conn, ch <-chan string) {
-  for msg := range ch {
-    fmt.Fprintln(conn, msg)
-  }
+	for msg := range ch {
+		fmt.Fprintln(conn, msg)
+	}
 }
 
 func handleConn(conn net.Conn) {
-  ch := make(chan string)
-  go clientWriter(conn, ch)
+	ch := make(chan string)
+	go clientWriter(conn, ch)
 
-  apelido := conn.RemoteAddr().String()
-  ch <- "vc é " + apelido
-  messages <- apelido + " chegou!"
-  entering <- ch
+	apelido := conn.RemoteAddr().String()
+	ch <- "vc é " + apelido
+	messages <- apelido + " chegou!"
+	entering <- ch
 
-  input := bufio.NewScanner(conn)
-  for input.Scan() {
-    messages <- apelido + ":" + input.Text()
-  }
+	input := bufio.NewScanner(conn)
+	for input.Scan() {
+		messages <- apelido + ":" + input.Text()
+		entrada := strings.Split(input.Text(), " ")
+		comandos := entrada[0]
 
-  leaving <- ch
-  messages <- apelido + " se foi "
-  conn.Close()
+		switch comandos {
+		case ".nick":
+			messages <- "Username alterado para " + entrada[1]
+			apelido = entrada[1]
+
+		case ".sair":
+			leaving <- ch
+			messages <- apelido + " se foi "
+			conn.Close()
+		}
+	}
 }
 
 func main() {
-  fmt.Println("Iniciando servidor...")
-  listener, err := net.Listen("tcp", "localhost:3000")
-  if err != nil {
-    log.Fatal(err)
-  }
-  go broadcaster()
-  for {
-    conn, err := listener.Accept()
-    if err != nil {
-      log.Print(err)
-      continue
-    }
-    go handleConn(conn)
-  }
+	fmt.Println("Iniciando servidor...")
+	listener, err := net.Listen("tcp", "localhost:3000")
+	if err != nil {
+		log.Fatal(err)
+	}
+	go broadcaster()
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Print(err)
+			continue
+		}
+		go handleConn(conn)
+	}
 }
-
